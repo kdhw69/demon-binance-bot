@@ -36,6 +36,7 @@ class FundingRecord:
     funding_time_ms: int
     funding_time_utc: str
     funding_rate: str
+    mark_price: str
 
 
 @dataclass(frozen=True)
@@ -96,10 +97,15 @@ def parse_funding(raw: dict) -> FundingRecord:
         raise ValueError("Malformed funding-rate row.")
     funding_time_ms = _milliseconds(raw.get("fundingTime"), "funding timestamp")
     funding_rate = _decimal_string(raw.get("fundingRate"), "funding rate")
+    mark_price = raw.get("markPrice")
+    if mark_price in (None, ""):
+        raise ValueError("Missing funding mark price.")
+    mark_price = _decimal_string(mark_price, "mark price")
     return FundingRecord(
         funding_time_ms=funding_time_ms,
         funding_time_utc=utc_timestamp(funding_time_ms),
         funding_rate=funding_rate,
+        mark_price=mark_price,
     )
 
 
@@ -204,6 +210,7 @@ class HistoricalDataDownloader:
         latest_closed_open_ms = (now_ms // INTERVAL_MS) * INTERVAL_MS - INTERVAL_MS
         end_ms = latest_closed_open_ms + INTERVAL_MS - 1 if end_ms is None else end_ms
         records = []
+        mark_prices = self._fetch_mark_prices(symbol, start_ms, end_ms)
         cursor = start_ms
         while cursor <= end_ms:
             rows = self._get_json(
@@ -213,6 +220,13 @@ class HistoricalDataDownloader:
             if not rows:
                 break
             for row in rows:
+                if not row.get("markPrice"):
+                    funding_time = _milliseconds(row.get("fundingTime"), "funding timestamp")
+                    mark_price = mark_prices.get(funding_time // (8 * 60 * 60 * 1000) * (8 * 60 * 60 * 1000))
+                    if mark_price is None:
+                        raise ValueError("Missing funding mark price.")
+                    row = dict(row)
+                    row["markPrice"] = mark_price
                 funding = parse_funding(row)
                 if start_ms <= funding.funding_time_ms <= end_ms:
                     records.append(funding)
@@ -223,6 +237,26 @@ class HistoricalDataDownloader:
         records.sort(key=lambda item: item.funding_time_ms)
         validate_funding_rates(records)
         return records
+
+    def _fetch_mark_prices(self, symbol: str, start_ms: int, end_ms: int) -> Dict[int, str]:
+        mark_prices = {}
+        cursor = start_ms
+        while cursor <= end_ms:
+            rows = self._get_json(
+                "/fapi/v1/premiumIndexKlines",
+                {"symbol": symbol, "interval": "8h", "startTime": cursor, "endTime": end_ms, "limit": CANDLE_LIMIT},
+            )
+            if not rows:
+                break
+            for row in rows:
+                if len(row) < 5:
+                    raise ValueError("Malformed mark-price row.")
+                mark_prices[_milliseconds(row[0], "mark-price timestamp")] = _decimal_string(row[1], "mark price")
+            last_open = _milliseconds(rows[-1][0], "mark-price timestamp")
+            if len(rows) < CANDLE_LIMIT or last_open >= end_ms:
+                break
+            cursor = last_open + 1
+        return mark_prices
 
     def download_symbol(self, symbol: str) -> Dict[str, ValidationResult]:
         candles = self.fetch_candles(symbol)
@@ -248,9 +282,9 @@ class HistoricalDataDownloader:
         path = self.output_dir / f"{symbol}_funding_rates.csv"
         with path.open("w", newline="") as output:
             writer = csv.writer(output)
-            writer.writerow(["funding_time_utc", "funding_rate"])
+            writer.writerow(["funding_time_utc", "funding_rate", "mark_price"])
             writer.writerows(
-                [record.funding_time_utc, record.funding_rate]
+                [record.funding_time_utc, record.funding_rate, record.mark_price]
                 for record in funding_rates
             )
 

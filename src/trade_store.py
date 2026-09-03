@@ -16,7 +16,9 @@ class RiskState:
     day_start_equity: Optional[Decimal]
     trading_date: date
     daily_realized_pnl: Decimal
+    daily_loss_halt_until: Optional[datetime]
     consecutive_losses: int
+    consecutive_loss_cooldown_until: Optional[datetime]
     halted: bool
     halt_reason: Optional[str]
     last_update_time: datetime
@@ -98,7 +100,9 @@ class TradeStore:
                     day_start_equity TEXT,
                     trading_date TEXT NOT NULL,
                     daily_realized_pnl TEXT NOT NULL,
+                    daily_loss_halt_until TEXT,
                     consecutive_losses INTEGER NOT NULL,
+                    consecutive_loss_cooldown_until TEXT,
                     halted INTEGER NOT NULL,
                     halt_reason TEXT,
                     last_update_time TEXT NOT NULL
@@ -111,13 +115,17 @@ class TradeStore:
             }
             if "day_start_equity" not in columns:
                 connection.execute("ALTER TABLE risk_state ADD COLUMN day_start_equity TEXT")
+            if "consecutive_loss_cooldown_until" not in columns:
+                connection.execute("ALTER TABLE risk_state ADD COLUMN consecutive_loss_cooldown_until TEXT")
+            if "daily_loss_halt_until" not in columns:
+                connection.execute("ALTER TABLE risk_state ADD COLUMN daily_loss_halt_until TEXT")
             connection.execute(
                 """
                 INSERT OR IGNORE INTO risk_state (
                     state_id, peak_account_equity, day_start_equity, trading_date,
-                    daily_realized_pnl, consecutive_losses, halted,
+                    daily_realized_pnl, daily_loss_halt_until, consecutive_losses, consecutive_loss_cooldown_until, halted,
                     halt_reason, last_update_time
-                ) VALUES (1, NULL, NULL, ?, '0', 0, 0, NULL, ?)
+                ) VALUES (1, NULL, NULL, ?, '0', NULL, 0, NULL, 0, NULL, ?)
                 """,
                 (datetime.now(timezone.utc).date().isoformat(), _utc_timestamp()),
             )
@@ -239,13 +247,17 @@ class TradeStore:
             raise ValueError("Risk state is missing.")
         today = datetime.now(timezone.utc).date().isoformat()
         if row["trading_date"] != today:
+            clear_legacy_daily_halt = row["halt_reason"] == "Daily realized loss limit reached."
             connection.execute(
                 """
                 UPDATE risk_state
-                SET trading_date = ?, daily_realized_pnl = '0', last_update_time = ?
+                SET trading_date = ?, daily_realized_pnl = '0', daily_loss_halt_until = NULL,
+                    halted = CASE WHEN ? THEN 0 ELSE halted END,
+                    halt_reason = CASE WHEN ? THEN NULL ELSE halt_reason END,
+                    last_update_time = ?
                 WHERE state_id = 1
                 """,
-                (today, _utc_timestamp()),
+                (today, clear_legacy_daily_halt, clear_legacy_daily_halt, _utc_timestamp()),
             )
             row = connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
         return row
@@ -271,14 +283,17 @@ class TradeStore:
                 day_start = equity_text
             if peak is None or Decimal(equity_text) > Decimal(peak):
                 peak = equity_text
+            clear_legacy_daily_halt = date_changed and row["halt_reason"] == "Daily realized loss limit reached."
             connection.execute(
                 """
                 UPDATE risk_state
                 SET peak_account_equity = ?, day_start_equity = ?,
-                    trading_date = ?, daily_realized_pnl = ?, last_update_time = ?
+                    trading_date = ?, daily_realized_pnl = ?, daily_loss_halt_until = ?, last_update_time = ?
+                    , halted = CASE WHEN ? THEN 0 ELSE halted END
+                    , halt_reason = CASE WHEN ? THEN NULL ELSE halt_reason END
                 WHERE state_id = 1
                 """,
-                (peak, day_start, today, "0" if date_changed else row["daily_realized_pnl"], _utc_timestamp()),
+                (peak, day_start, today, "0" if date_changed else row["daily_realized_pnl"], None if date_changed else row["daily_loss_halt_until"], _utc_timestamp(), clear_legacy_daily_halt, clear_legacy_daily_halt),
             )
             return self._risk_state(
                 connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
@@ -289,6 +304,7 @@ class TradeStore:
         peak_account_equity: Optional[Decimal] = None,
         halted: Optional[bool] = None,
         halt_reason: Optional[str] = None,
+        consecutive_loss_cooldown_until: Optional[datetime] = None,
     ) -> RiskState:
         with self._transaction() as connection:
             row = self._current_risk_state(connection)
@@ -300,13 +316,40 @@ class TradeStore:
             )
             new_halted = row["halted"] if halted is None else int(halted)
             new_reason = row["halt_reason"] if halt_reason is None else halt_reason
+            new_cooldown = row["consecutive_loss_cooldown_until"]
+            if consecutive_loss_cooldown_until is not None:
+                new_cooldown = _utc_timestamp(consecutive_loss_cooldown_until)
             connection.execute(
                 """
                 UPDATE risk_state
-                SET peak_account_equity = ?, halted = ?, halt_reason = ?, last_update_time = ?
+                SET peak_account_equity = ?, halted = ?, halt_reason = ?, consecutive_loss_cooldown_until = ?, last_update_time = ?
                 WHERE state_id = 1
                 """,
-                (peak, new_halted, new_reason, _utc_timestamp()),
+                (peak, new_halted, new_reason, new_cooldown, _utc_timestamp()),
+            )
+            row = connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
+            return self._risk_state(row)
+
+    def begin_consecutive_loss_cooldown(self, until: datetime) -> RiskState:
+        with self._transaction() as connection:
+            row = self._current_risk_state(connection)
+            connection.execute(
+                """
+                UPDATE risk_state
+                SET consecutive_losses = 0, consecutive_loss_cooldown_until = ?, last_update_time = ?
+                WHERE state_id = 1
+                """,
+                (_utc_timestamp(until), _utc_timestamp()),
+            )
+            row = connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
+            return self._risk_state(row)
+
+    def begin_daily_loss_halt(self, until: datetime) -> RiskState:
+        with self._transaction() as connection:
+            self._current_risk_state(connection)
+            connection.execute(
+                "UPDATE risk_state SET daily_loss_halt_until = ?, last_update_time = ? WHERE state_id = 1",
+                (_utc_timestamp(until), _utc_timestamp()),
             )
             row = connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
             return self._risk_state(row)
@@ -317,7 +360,17 @@ class TradeStore:
             day_start_equity=_decimal(row["day_start_equity"]),
             trading_date=date.fromisoformat(row["trading_date"]),
             daily_realized_pnl=Decimal(row["daily_realized_pnl"]),
+            daily_loss_halt_until=(
+                None
+                if row["daily_loss_halt_until"] is None
+                else _utc_datetime(row["daily_loss_halt_until"])
+            ),
             consecutive_losses=int(row["consecutive_losses"]),
+            consecutive_loss_cooldown_until=(
+                None
+                if row["consecutive_loss_cooldown_until"] is None
+                else _utc_datetime(row["consecutive_loss_cooldown_until"])
+            ),
             halted=bool(row["halted"]),
             halt_reason=row["halt_reason"],
             last_update_time=_utc_datetime(row["last_update_time"]),

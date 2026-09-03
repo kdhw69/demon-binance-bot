@@ -155,6 +155,21 @@ def _account_risk_state(client) -> AccountRiskState:
     )
 
 
+def _reserve_plan(account: AccountRiskState, plan: RiskPlan) -> AccountRiskState:
+    return AccountRiskState(
+        equity=account.equity,
+        open_positions=account.open_positions + 1,
+        combined_open_risk=(
+            account.combined_open_risk
+            + plan.risk_amount / account.equity
+        ),
+        total_margin_used=account.total_margin_used + plan.margin_used,
+        daily_loss=account.daily_loss,
+        consecutive_losses=account.consecutive_losses,
+        drawdown=account.drawdown,
+    )
+
+
 def get_latest_risk_plans() -> Dict[str, Optional[RiskPlan]]:
     client = create_client()
     account = _account_risk_state(client)
@@ -165,5 +180,7 @@ def get_latest_risk_plans() -> Dict[str, Optional[RiskPlan]]:
         if signal.direction == "NO_SIGNAL":
             plans[symbol] = None
         else:
-            plans[symbol] = create_risk_plan(signal, account, rules_by_symbol[symbol])
+            plan = create_risk_plan(signal, account, rules_by_symbol[symbol])
+            plans[symbol] = plan
+            account = _reserve_plan(account, plan)
     return plans

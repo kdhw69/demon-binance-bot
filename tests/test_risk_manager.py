@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from src.exchange_rules import TradingRules
 from src.market_data import Candle
-from src.risk_manager import AccountRiskState, create_risk_plan
+from src.risk_manager import AccountRiskState, _reserve_plan, create_risk_plan
 from src.signal_engine import Signal
 
 
@@ -42,8 +42,8 @@ class RiskManagerTests(unittest.TestCase):
         plan = create_risk_plan(signal("LONG"), ACCOUNT, RULES)
         self.assertEqual(plan.stop_loss, Decimal("97.00"))
         self.assertEqual(plan.take_profit, Decimal("106.00"))
-        self.assertEqual(plan.quantity, Decimal("33.333"))
-        self.assertLess(plan.risk_amount, Decimal("100"))
+        self.assertEqual(plan.quantity, Decimal("8.333"))
+        self.assertLess(plan.risk_amount, Decimal("25"))
 
     def test_short_plan_rounds_exits_safely(self):
         plan = create_risk_plan(signal("SHORT"), ACCOUNT, RULES)
@@ -56,16 +56,35 @@ class RiskManagerTests(unittest.TestCase):
         account = AccountRiskState(
             equity=Decimal("10000"),
             open_positions=1,
-            combined_open_risk=Decimal("0.024"),
+            combined_open_risk=Decimal("0.006"),
             total_margin_used=Decimal("0"),
         )
         plan = create_risk_plan(signal("LONG"), account, RULES)
-        self.assertLessEqual(plan.risk_amount, Decimal("10"))
+        self.assertLessEqual(plan.risk_amount, Decimal("2.5"))
+
+    def test_sequential_plans_respect_combined_risk_limit(self):
+        account = ACCOUNT
+        plans = []
+
+        for _ in range(3):
+            plan = create_risk_plan(signal("LONG"), account, RULES)
+            plans.append(plan)
+            account = _reserve_plan(account, plan)
+
+        total_risk = sum(
+            (plan.risk_amount for plan in plans),
+            Decimal("0"),
+        )
+        self.assertLessEqual(
+            total_risk,
+            ACCOUNT.equity * Decimal("0.00625"),
+        )
+        self.assertLess(plans[-1].risk_amount, Decimal("25"))
 
     def test_risk_limits_reject(self):
         cases = [
             ("positions", AccountRiskState(Decimal("10000"), 3, Decimal("0"), Decimal("0"))),
-            ("risk", AccountRiskState(Decimal("10000"), 0, Decimal("0.025"), Decimal("0"))),
+            ("risk", AccountRiskState(Decimal("10000"), 0, Decimal("0.00625"), Decimal("0"))),
             ("margin", AccountRiskState(Decimal("10000"), 0, Decimal("0"), Decimal("3000"))),
             ("daily", AccountRiskState(Decimal("10000"), 0, Decimal("0"), Decimal("0"), Decimal("0.05"))),
             ("losses", AccountRiskState(Decimal("10000"), 0, Decimal("0"), Decimal("0"), Decimal("0"), 4)),

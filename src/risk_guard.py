@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional, Sequence, Set
 
 from .binance_client import create_client
@@ -21,6 +22,12 @@ class GuardDecision:
 
 def _limit(value) -> Decimal:
     return Decimal(str(value))
+
+
+def _next_utc_midnight(now: datetime) -> datetime:
+    now = now.astimezone(timezone.utc)
+    tomorrow = now.date() + timedelta(days=1)
+    return datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
 
 
 def _position_symbols(positions: Iterable) -> Set[str]:
@@ -46,7 +53,11 @@ def evaluate_guard(
     binance_position_symbols: Set[str],
     local_active_trades: Sequence[dict],
     total_used_margin: Decimal,
+    consecutive_loss_cooldown_until: Optional[datetime] = None,
+    daily_loss_halt_until: Optional[datetime] = None,
+    now: Optional[datetime] = None,
 ) -> GuardDecision:
+    now = datetime.now(timezone.utc) if now is None else now.astimezone(timezone.utc)
     reasons = []
     if account_equity <= 0:
         return GuardDecision(False, ("Current account equity is unavailable.",))
@@ -59,10 +70,14 @@ def evaluate_guard(
 
     if halted:
         reasons.append(halt_reason or "Trading is permanently halted.")
-    if -daily_realized_pnl >= day_start_equity * _limit(DAILY_LOSS_LIMIT):
+    if daily_loss_halt_until is not None and now < daily_loss_halt_until:
+        reasons.append("Daily realized loss halt is active.")
+    elif daily_loss_halt_until is None and -daily_realized_pnl >= day_start_equity * _limit(DAILY_LOSS_LIMIT):
         reasons.append("Daily realized loss limit reached.")
     if consecutive_losses >= 4:
-        reasons.append("Consecutive loss limit reached.")
+        reasons.append("Consecutive-loss cooldown state is invalid.")
+    elif consecutive_loss_cooldown_until is not None and now < consecutive_loss_cooldown_until:
+        reasons.append("Consecutive-loss cooldown is active.")
     if account_equity <= peak_equity * (Decimal("1") - _limit(MAX_DRAWDOWN_STOP)):
         reasons.append("Maximum drawdown stop reached.")
     if len(binance_position_symbols) >= MAX_SIMULTANEOUS_POSITIONS:
@@ -111,13 +126,52 @@ def check_live_guard(database_path=None) -> GuardDecision:
             peak_equity=state.peak_account_equity,
             daily_realized_pnl=state.daily_realized_pnl,
             consecutive_losses=state.consecutive_losses,
+            consecutive_loss_cooldown_until=state.consecutive_loss_cooldown_until,
+            daily_loss_halt_until=state.daily_loss_halt_until,
             halted=state.halted,
             halt_reason=state.halt_reason,
             binance_position_symbols=position_symbols,
             local_active_trades=active_trades,
             total_used_margin=account_margin + planned_margin,
         )
-        if not decision.allowed and not state.halted:
+        if state.consecutive_losses >= 4:
+            cooldown_until = datetime.now(timezone.utc) + timedelta(hours=12)
+            state = store.begin_consecutive_loss_cooldown(cooldown_until)
+            decision = evaluate_guard(
+                account_equity=equity,
+                day_start_equity=state.day_start_equity,
+                peak_equity=state.peak_account_equity,
+                daily_realized_pnl=state.daily_realized_pnl,
+                consecutive_losses=state.consecutive_losses,
+                consecutive_loss_cooldown_until=state.consecutive_loss_cooldown_until,
+                halted=state.halted,
+                halt_reason=state.halt_reason,
+                binance_position_symbols=position_symbols,
+                local_active_trades=active_trades,
+                total_used_margin=account_margin + planned_margin,
+            )
+        if state.daily_loss_halt_until is None and -state.daily_realized_pnl >= state.day_start_equity * _limit(DAILY_LOSS_LIMIT):
+            state = store.begin_daily_loss_halt(_next_utc_midnight(datetime.now(timezone.utc)))
+            decision = evaluate_guard(
+                account_equity=equity,
+                day_start_equity=state.day_start_equity,
+                peak_equity=state.peak_account_equity,
+                daily_realized_pnl=state.daily_realized_pnl,
+                consecutive_losses=state.consecutive_losses,
+                consecutive_loss_cooldown_until=state.consecutive_loss_cooldown_until,
+                daily_loss_halt_until=state.daily_loss_halt_until,
+                halted=state.halted,
+                halt_reason=state.halt_reason,
+                binance_position_symbols=position_symbols,
+                local_active_trades=active_trades,
+                total_used_margin=account_margin + planned_margin,
+            )
+        permanent_reasons = {
+            reason
+            for reason in decision.reasons
+            if "cooldown" not in reason.lower() and "daily realized loss" not in reason.lower()
+        }
+        if permanent_reasons and not state.halted:
             reason = "; ".join(decision.reasons)
             store.update_risk_state(halted=True, halt_reason=reason)
         return decision

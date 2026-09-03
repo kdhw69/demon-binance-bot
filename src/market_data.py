@@ -26,7 +26,7 @@ class Candle:
 def _get_closed_candles(client, symbol: str) -> List[Candle]:
     response = client.rest_api.kline_candlestick_data(
         symbol=symbol,
-        interval=KlineCandlestickDataIntervalEnum.INTERVAL_2h,
+        interval=KlineCandlestickDataIntervalEnum.INTERVAL_4h,
         limit=_CANDLE_LIMIT,
     ).data()
 
@@ -60,7 +60,7 @@ def _get_closed_candles(client, symbol: str) -> List[Candle]:
 
 
 def get_closed_candles_for_symbols() -> dict[str, List[Candle]]:
-    if TIMEFRAME != "2h":
+    if TIMEFRAME != "4h":
         raise ValueError("Configured timeframe is not supported.")
     client = create_client()
     return {
