@@ -75,8 +75,9 @@ def _extract_rules(symbol_info) -> TradingRules:
     )
 
 
-def get_exchange_rules() -> Dict[str, TradingRules]:
-    client = create_client()
+def get_exchange_rules(client=None) -> Dict[str, TradingRules]:
+    if client is None:
+        client = create_client()
     exchange_info = client.rest_api.exchange_information().data()
     symbols_by_name = {symbol.symbol: symbol for symbol in (exchange_info.symbols or [])}
 
