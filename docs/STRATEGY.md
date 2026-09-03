@@ -24,6 +24,10 @@
 
 ## Indicators and Exits
 
+Signals are evaluated only after a candle has fully closed. The Donchian breakout
+levels use the 20 candles immediately before the signal candle, excluding the
+signal candle itself. ATR uses Wilder smoothing.
+
 | Parameter | Value |
 |---|---|
 | EMA period | 200 |

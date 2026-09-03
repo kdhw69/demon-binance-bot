@@ -18,6 +18,8 @@ _CANDLE_CLOSE_PRICE_INDEX = 4
 @dataclass(frozen=True)
 class Candle:
     close_time: datetime
+    high_price: Decimal
+    low_price: Decimal
     close_price: Decimal
 
 
@@ -35,6 +37,8 @@ def _get_closed_candles(client, symbol: str) -> List[Candle]:
                 int(raw_candle[_CANDLE_CLOSE_TIME_INDEX]) / 1000,
                 tz=timezone.utc,
             ),
+            high_price=Decimal(str(raw_candle[2])),
+            low_price=Decimal(str(raw_candle[3])),
             close_price=Decimal(str(raw_candle[_CANDLE_CLOSE_PRICE_INDEX])),
         )
         for raw_candle in response
