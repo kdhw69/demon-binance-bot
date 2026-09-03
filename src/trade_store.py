@@ -13,6 +13,7 @@ _DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[1] / "data" / "trading
 @dataclass(frozen=True)
 class RiskState:
     peak_account_equity: Optional[Decimal]
+    day_start_equity: Optional[Decimal]
     trading_date: date
     daily_realized_pnl: Decimal
     consecutive_losses: int
@@ -94,6 +95,7 @@ class TradeStore:
                 CREATE TABLE IF NOT EXISTS risk_state (
                     state_id INTEGER PRIMARY KEY CHECK (state_id = 1),
                     peak_account_equity TEXT,
+                    day_start_equity TEXT,
                     trading_date TEXT NOT NULL,
                     daily_realized_pnl TEXT NOT NULL,
                     consecutive_losses INTEGER NOT NULL,
@@ -103,13 +105,19 @@ class TradeStore:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(risk_state)")
+            }
+            if "day_start_equity" not in columns:
+                connection.execute("ALTER TABLE risk_state ADD COLUMN day_start_equity TEXT")
             connection.execute(
                 """
                 INSERT OR IGNORE INTO risk_state (
-                    state_id, peak_account_equity, trading_date,
+                    state_id, peak_account_equity, day_start_equity, trading_date,
                     daily_realized_pnl, consecutive_losses, halted,
                     halt_reason, last_update_time
-                ) VALUES (1, NULL, ?, '0', 0, 0, NULL, ?)
+                ) VALUES (1, NULL, NULL, ?, '0', 0, 0, NULL, ?)
                 """,
                 (datetime.now(timezone.utc).date().isoformat(), _utc_timestamp()),
             )
@@ -247,6 +255,35 @@ class TradeStore:
             row = self._current_risk_state(connection)
             return self._risk_state(row)
 
+    def sync_equity(self, current_equity: Decimal) -> RiskState:
+        equity_text = _decimal_text(current_equity, "current_equity")
+        if Decimal(equity_text) <= 0:
+            raise ValueError("Current equity must be positive.")
+        with self._transaction() as connection:
+            today = datetime.now(timezone.utc).date().isoformat()
+            row = connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
+            if row is None:
+                raise ValueError("Risk state is missing.")
+            date_changed = row["trading_date"] != today
+            peak = row["peak_account_equity"]
+            day_start = row["day_start_equity"]
+            if date_changed or day_start is None:
+                day_start = equity_text
+            if peak is None or Decimal(equity_text) > Decimal(peak):
+                peak = equity_text
+            connection.execute(
+                """
+                UPDATE risk_state
+                SET peak_account_equity = ?, day_start_equity = ?,
+                    trading_date = ?, daily_realized_pnl = ?, last_update_time = ?
+                WHERE state_id = 1
+                """,
+                (peak, day_start, today, "0" if date_changed else row["daily_realized_pnl"], _utc_timestamp()),
+            )
+            return self._risk_state(
+                connection.execute("SELECT * FROM risk_state WHERE state_id = 1").fetchone()
+            )
+
     def update_risk_state(
         self,
         peak_account_equity: Optional[Decimal] = None,
@@ -277,6 +314,7 @@ class TradeStore:
     def _risk_state(self, row: sqlite3.Row) -> RiskState:
         return RiskState(
             peak_account_equity=_decimal(row["peak_account_equity"]),
+            day_start_equity=_decimal(row["day_start_equity"]),
             trading_date=date.fromisoformat(row["trading_date"]),
             daily_realized_pnl=Decimal(row["daily_realized_pnl"]),
             consecutive_losses=int(row["consecutive_losses"]),
