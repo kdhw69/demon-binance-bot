@@ -58,6 +58,57 @@ class TradeStoreTests(unittest.TestCase):
         self.assertTrue(row["entry_time"].endswith("+00:00"))
         self.assertTrue(row["exit_time"].endswith("+00:00"))
 
+    def test_exchange_order_ids_are_stored(self):
+        trade_id = self.record_trade()
+
+        self.store.mark_open_with_exchange_orders(
+            trade_id=trade_id,
+            entry_order_id=101,
+            entry_client_order_id="entry-101",
+            stop_algo_id=202,
+            stop_client_algo_id="stop-202",
+            take_profit_algo_id=303,
+            take_profit_client_algo_id="take-303",
+        )
+
+        trade = self.store.read_active_trades()[0]
+        self.assertEqual(trade["status"], "OPEN")
+        self.assertEqual(trade["entry_order_id"], 101)
+        self.assertEqual(trade["entry_client_order_id"], "entry-101")
+        self.assertEqual(trade["stop_algo_id"], 202)
+        self.assertEqual(trade["stop_client_algo_id"], "stop-202")
+        self.assertEqual(trade["take_profit_algo_id"], 303)
+        self.assertEqual(
+            trade["take_profit_client_algo_id"],
+            "take-303",
+        )
+
+    def test_failed_planned_trade_is_not_active(self):
+        trade_id = self.record_trade()
+
+        self.store.mark_failed(trade_id)
+
+        self.assertEqual(self.store.read_active_trades(), [])
+        row = self.store._connection.execute(
+            "SELECT status FROM trades WHERE trade_id = ?",
+            (trade_id,),
+        ).fetchone()
+        self.assertEqual(row["status"], "FAILED")
+
+    def test_invalid_exchange_order_ids_are_rejected(self):
+        trade_id = self.record_trade()
+
+        with self.assertRaisesRegex(ValueError, "positive integers"):
+            self.store.mark_open_with_exchange_orders(
+                trade_id=trade_id,
+                entry_order_id=0,
+                entry_client_order_id="entry",
+                stop_algo_id=2,
+                stop_client_algo_id="stop",
+                take_profit_algo_id=3,
+                take_profit_client_algo_id="take",
+            )
+
     def test_daily_pnl_and_consecutive_losses(self):
         first = self.record_trade()
         self.store.mark_open(first)

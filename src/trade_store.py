@@ -119,6 +119,27 @@ class TradeStore:
                 connection.execute("ALTER TABLE risk_state ADD COLUMN consecutive_loss_cooldown_until TEXT")
             if "daily_loss_halt_until" not in columns:
                 connection.execute("ALTER TABLE risk_state ADD COLUMN daily_loss_halt_until TEXT")
+            trade_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(trades)"
+                )
+            }
+            exchange_order_columns = {
+                "entry_order_id": "INTEGER",
+                "entry_client_order_id": "TEXT",
+                "stop_algo_id": "INTEGER",
+                "stop_client_algo_id": "TEXT",
+                "take_profit_algo_id": "INTEGER",
+                "take_profit_client_algo_id": "TEXT",
+            }
+            for column_name, column_type in exchange_order_columns.items():
+                if column_name not in trade_columns:
+                    connection.execute(
+                        f"ALTER TABLE trades ADD COLUMN "
+                        f"{column_name} {column_type}"
+                    )
+
             connection.execute(
                 """
                 INSERT OR IGNORE INTO risk_state (
@@ -161,6 +182,76 @@ class TradeStore:
                 ),
             )
             return int(cursor.lastrowid)
+
+    def mark_open_with_exchange_orders(
+        self,
+        trade_id: int,
+        entry_order_id: int,
+        entry_client_order_id: str,
+        stop_algo_id: int,
+        stop_client_algo_id: str,
+        take_profit_algo_id: int,
+        take_profit_client_algo_id: str,
+        entry_time: Optional[datetime] = None,
+    ) -> None:
+        numeric_ids = (
+            entry_order_id,
+            stop_algo_id,
+            take_profit_algo_id,
+        )
+        client_ids = (
+            entry_client_order_id,
+            stop_client_algo_id,
+            take_profit_client_algo_id,
+        )
+        if any(
+            not isinstance(value, int) or value <= 0
+            for value in numeric_ids
+        ):
+            raise ValueError("Exchange order ids must be positive integers.")
+        if any(not value for value in client_ids):
+            raise ValueError("Exchange client order ids are required.")
+
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trades
+                SET status = 'OPEN',
+                    entry_time = ?,
+                    entry_order_id = ?,
+                    entry_client_order_id = ?,
+                    stop_algo_id = ?,
+                    stop_client_algo_id = ?,
+                    take_profit_algo_id = ?,
+                    take_profit_client_algo_id = ?
+                WHERE trade_id = ? AND status = 'PLANNED'
+                """,
+                (
+                    _utc_timestamp(entry_time),
+                    entry_order_id,
+                    entry_client_order_id,
+                    stop_algo_id,
+                    stop_client_algo_id,
+                    take_profit_algo_id,
+                    take_profit_client_algo_id,
+                    trade_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Trade is missing or is not planned.")
+
+    def mark_failed(self, trade_id: int) -> None:
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trades
+                SET status = 'FAILED'
+                WHERE trade_id = ? AND status = 'PLANNED'
+                """,
+                (trade_id,),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Trade is missing or is not planned.")
 
     def mark_open(self, trade_id: int, entry_time: Optional[datetime] = None) -> None:
         with self._transaction() as connection:
@@ -235,6 +326,12 @@ class TradeStore:
             "take_profit_price": Decimal(row["take_profit_price"]),
             "planned_risk": Decimal(row["planned_risk"]),
             "margin_used": Decimal(row["margin_used"]),
+            "entry_order_id": row["entry_order_id"],
+            "entry_client_order_id": row["entry_client_order_id"],
+            "stop_algo_id": row["stop_algo_id"],
+            "stop_client_algo_id": row["stop_client_algo_id"],
+            "take_profit_algo_id": row["take_profit_algo_id"],
+            "take_profit_client_algo_id": row["take_profit_client_algo_id"],
             "entry_time": None if row["entry_time"] is None else _utc_datetime(row["entry_time"]),
             "exit_time": None if row["exit_time"] is None else _utc_datetime(row["exit_time"]),
             "exit_price": _decimal(row["exit_price"]),
