@@ -64,9 +64,22 @@ def evaluate_guard(
     if day_start_equity is None or peak_equity is None:
         return GuardDecision(False, ("Risk equity state is unavailable.",))
 
-    local_symbols = {trade["symbol"] for trade in local_active_trades}
+    local_symbols = {
+        trade["symbol"]
+        for trade in local_active_trades
+        if trade.get("status") == "OPEN"
+    }
+    if any(
+        trade.get("status") == "PLANNED"
+        for trade in local_active_trades
+    ):
+        reasons.append(
+            "Pending planned trade requires reconciliation."
+        )
     if binance_position_symbols != local_symbols:
-        reasons.append("Reconciliation required: Binance positions and local active trades differ.")
+        reasons.append(
+            "Reconciliation required: Binance positions and local open trades differ."
+        )
 
     if halted:
         reasons.append(halt_reason or "Trading is permanently halted.")
@@ -166,14 +179,19 @@ def check_live_guard(database_path=None) -> GuardDecision:
                 local_active_trades=active_trades,
                 total_used_margin=account_margin + planned_margin,
             )
-        permanent_reasons = {
-            reason
-            for reason in decision.reasons
-            if "cooldown" not in reason.lower() and "daily realized loss" not in reason.lower()
-        }
-        if permanent_reasons and not state.halted:
-            reason = "; ".join(decision.reasons)
-            store.update_risk_state(halted=True, halt_reason=reason)
+        permanent_reason = next(
+            (
+                reason
+                for reason in decision.reasons
+                if reason == "Maximum drawdown stop reached."
+            ),
+            None,
+        )
+        if permanent_reason is not None and not state.halted:
+            store.update_risk_state(
+                halted=True,
+                halt_reason=permanent_reason,
+            )
         return decision
     finally:
         store.close()

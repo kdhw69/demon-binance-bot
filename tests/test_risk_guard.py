@@ -49,6 +49,45 @@ class RiskGuardTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertIn("Reconciliation required", decision.reasons[0])
 
+    def test_planned_trade_blocks_without_position_mismatch(self):
+        decision = self.decision(
+            local_active_trades=[
+                {
+                    "symbol": "BTCUSDT",
+                    "status": "PLANNED",
+                    "planned_risk": Decimal("1"),
+                }
+            ],
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertIn(
+            "Pending planned trade requires reconciliation.",
+            decision.reasons,
+        )
+        self.assertFalse(
+            any(
+                "Binance positions and local open trades differ"
+                in reason
+                for reason in decision.reasons
+            )
+        )
+
+    def test_matching_open_trade_reconciles(self):
+        decision = self.decision(
+            binance_position_symbols={"BTCUSDT"},
+            local_active_trades=[
+                {
+                    "symbol": "BTCUSDT",
+                    "status": "OPEN",
+                    "planned_risk": Decimal("1"),
+                }
+            ],
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.reasons, ())
+
     def test_first_run_initializes_day_start_and_peak(self):
         with tempfile.TemporaryDirectory() as directory:
             store = TradeStore(Path(directory) / "trading.db")
