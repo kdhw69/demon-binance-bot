@@ -10,8 +10,13 @@ from src.signal_engine import Signal
 from src.trade_store import TradeStore
 
 
-START = datetime(2026, 9, 4, 23, 59, tzinfo=timezone.utc)
-MIDNIGHT = datetime(2026, 9, 5, tzinfo=timezone.utc)
+CURRENT_UTC_DATE = datetime.now(timezone.utc).date()
+MIDNIGHT = datetime.combine(
+    CURRENT_UTC_DATE,
+    datetime.min.time(),
+    tzinfo=timezone.utc,
+)
+START = MIDNIGHT - timedelta(minutes=1)
 
 
 def base_guard(**changes):
