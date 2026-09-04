@@ -76,6 +76,19 @@ def _verify_symbol_settings(client, symbol: str) -> None:
         raise ValueError(f"10x leverage could not be verified for {symbol}.")
 
 
+def verify_demo_execution_settings(
+    client,
+    symbol: str,
+) -> None:
+    if symbol not in SYMBOLS:
+        raise ValueError("Execution symbol is not permitted.")
+    if not _verify_position_mode(client):
+        raise ValueError(
+            "One-way position mode is required for execution."
+        )
+    _verify_symbol_settings(client, symbol)
+
+
 def _ensure_symbol_settings(client, symbol: str) -> None:
     configuration = _symbol_configuration(client, symbol)
     if configuration.margin_type is None or configuration.leverage is None:

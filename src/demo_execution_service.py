@@ -3,6 +3,9 @@ from decimal import Decimal
 from typing import Callable, Optional
 
 from .binance_client import create_client
+from .configure_demo_account import (
+    verify_demo_execution_settings,
+)
 from .demo_order_requests import (
     build_demo_order_requests,
     build_emergency_close_request,
@@ -154,6 +157,10 @@ def execute_demo_preview(
     *,
     execution_enabled: bool = False,
     client=None,
+    settings_verifier: Callable[
+        [object, str],
+        None,
+    ] = verify_demo_execution_settings,
     reconciliation_checker: Callable[
         [Optional[object], Optional[object]],
         ReconciliationReport,
@@ -186,6 +193,7 @@ def execute_demo_preview(
         )
 
     api_client = create_client() if client is None else client
+    settings_verifier(api_client, preview.symbol)
     store = TradeStore(database_path)
     trade_id = store.record_planned_trade(
         preview.symbol,

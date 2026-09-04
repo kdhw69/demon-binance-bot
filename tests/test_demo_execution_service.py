@@ -65,6 +65,10 @@ def allowed_reconciliation(_database_path, _client):
     return ReconciliationReport(True, (), 0, 0)
 
 
+def allowed_settings(_client, _symbol):
+    return None
+
+
 class DemoExecutionServiceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -87,6 +91,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 "abc123",
                 self.database_path,
                 client=self.client,
+                settings_verifier=allowed_settings,
                 reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
@@ -112,7 +117,30 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                settings_verifier=allowed_settings,
                 reconciliation_checker=blocked_reconciliation,
+                guard_checker=allowed_guard,
+            )
+
+        self.api.new_order.assert_not_called()
+        self.api.new_algo_order.assert_not_called()
+
+    def test_invalid_account_settings_block_orders(self):
+        def blocked_settings(_client, _symbol):
+            raise ValueError("Isolated margin is required.")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Isolated margin",
+        ):
+            execute_demo_preview(
+                make_preview(),
+                "abc123",
+                self.database_path,
+                execution_enabled=True,
+                client=self.client,
+                settings_verifier=blocked_settings,
+                reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
 
@@ -132,6 +160,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
             self.database_path,
             execution_enabled=True,
             client=self.client,
+            settings_verifier=allowed_settings,
             reconciliation_checker=allowed_reconciliation,
             guard_checker=allowed_guard,
         )
@@ -179,6 +208,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                settings_verifier=allowed_settings,
                 reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
@@ -216,6 +246,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                settings_verifier=allowed_settings,
                 reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
@@ -246,6 +277,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                settings_verifier=allowed_settings,
                 reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
