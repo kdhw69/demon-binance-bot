@@ -28,6 +28,7 @@ class AccountRiskState:
     daily_loss: Decimal = Decimal("0")
     consecutive_losses: int = 0
     drawdown: Decimal = Decimal("0")
+    open_position_symbols: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -135,10 +136,12 @@ def _account_risk_state(client) -> AccountRiskState:
     account = client.rest_api.account_information_v3().data()
     equity = Decimal(str(account.total_margin_balance or account.total_wallet_balance))
     positions = account.positions or []
-    open_positions = sum(
-        Decimal(str(position.position_amt)) != Decimal("0")
+    open_position_symbols = frozenset(
+        position.symbol
         for position in positions
+        if Decimal(str(position.position_amt)) != Decimal("0")
     )
+    open_positions = len(open_position_symbols)
     combined_open_risk = sum(
         (abs(Decimal(str(position.initial_margin or "0"))) for position in positions),
         Decimal("0"),
@@ -152,6 +155,7 @@ def _account_risk_state(client) -> AccountRiskState:
         open_positions=open_positions,
         combined_open_risk=combined_open_risk,
         total_margin_used=total_margin_used,
+        open_position_symbols=open_position_symbols,
     )
 
 
@@ -167,6 +171,9 @@ def _reserve_plan(account: AccountRiskState, plan: RiskPlan) -> AccountRiskState
         daily_loss=account.daily_loss,
         consecutive_losses=account.consecutive_losses,
         drawdown=account.drawdown,
+        open_position_symbols=(
+            account.open_position_symbols | {plan.symbol}
+        ),
     )
 
 
@@ -177,7 +184,10 @@ def get_latest_risk_plans() -> Dict[str, Optional[RiskPlan]]:
     signals = get_latest_signals()
     plans = {}
     for symbol, signal in signals.items():
-        if signal.direction == "NO_SIGNAL":
+        if (
+            signal.direction == "NO_SIGNAL"
+            or symbol in account.open_position_symbols
+        ):
             plans[symbol] = None
         else:
             plan = create_risk_plan(signal, account, rules_by_symbol[symbol])

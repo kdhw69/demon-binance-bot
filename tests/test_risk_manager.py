@@ -1,10 +1,11 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.exchange_rules import TradingRules
 from src.market_data import Candle
-from src.risk_manager import AccountRiskState, _reserve_plan, create_risk_plan
+from src.risk_manager import AccountRiskState, _reserve_plan, create_risk_plan, get_latest_risk_plans
 from src.signal_engine import Signal
 
 
@@ -80,6 +81,37 @@ class RiskManagerTests(unittest.TestCase):
             ACCOUNT.equity * Decimal("0.00625"),
         )
         self.assertLess(plans[-1].risk_amount, Decimal("25"))
+
+    @patch("src.risk_manager.get_latest_signals")
+    @patch("src.risk_manager.get_exchange_rules")
+    @patch("src.risk_manager._account_risk_state")
+    @patch("src.risk_manager.create_client")
+    def test_existing_position_symbol_is_not_planned_again(
+        self,
+        create_client,
+        account_risk_state,
+        get_exchange_rules,
+        get_latest_signals,
+    ):
+        account_risk_state.return_value = AccountRiskState(
+            equity=Decimal("10000"),
+            open_positions=1,
+            combined_open_risk=Decimal("0.0025"),
+            total_margin_used=Decimal("100"),
+            open_position_symbols=frozenset({"BTCUSDT"}),
+        )
+        get_exchange_rules.return_value = {}
+        get_latest_signals.return_value = {
+            "BTCUSDT": signal("LONG"),
+            "ETHUSDT": signal("NO_SIGNAL"),
+            "SOLUSDT": signal("NO_SIGNAL"),
+        }
+
+        plans = get_latest_risk_plans()
+
+        self.assertIsNone(plans["BTCUSDT"])
+        self.assertIsNone(plans["ETHUSDT"])
+        self.assertIsNone(plans["SOLUSDT"])
 
     def test_risk_limits_reject(self):
         cases = [
