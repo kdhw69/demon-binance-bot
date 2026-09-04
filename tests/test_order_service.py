@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock, call
 
@@ -18,6 +19,9 @@ def make_preview(
     return ExecutionPreview(
         symbol=symbol,
         side=side,
+        signal_time=datetime(
+            2026, 9, 4, 7, 59, 59, tzinfo=timezone.utc
+        ),
         quantity=Decimal("0.001"),
         entry_price=Decimal("80000"),
         stop_loss=Decimal("79000"),

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
@@ -17,6 +18,7 @@ _DIRECTION_TO_SIDE = {
 class ExecutionPreview:
     symbol: str
     side: str
+    signal_time: datetime
     quantity: Decimal
     entry_price: Decimal
     stop_loss: Decimal
@@ -58,6 +60,7 @@ def build_execution_previews(
             ExecutionPreview(
                 symbol=symbol,
                 side=_DIRECTION_TO_SIDE[plan.direction],
+                signal_time=plan.signal_time,
                 quantity=plan.quantity,
                 entry_price=plan.entry_price,
                 stop_loss=plan.stop_loss,

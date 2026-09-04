@@ -207,6 +207,7 @@ def execute_demo_preview(
         requests.entry["new_client_order_id"],
         requests.stop_loss["client_algo_id"],
         requests.take_profit["client_algo_id"],
+        signal_time=preview.signal_time,
     )
 
     executed_quantity = None

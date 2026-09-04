@@ -79,6 +79,7 @@ class TradeStore:
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    signal_time TEXT,
                     quantity TEXT NOT NULL,
                     entry_price TEXT NOT NULL,
                     stop_loss_price TEXT NOT NULL,
@@ -126,6 +127,7 @@ class TradeStore:
                 )
             }
             exchange_order_columns = {
+                "signal_time": "TEXT",
                 "entry_order_id": "INTEGER",
                 "entry_client_order_id": "TEXT",
                 "stop_algo_id": "INTEGER",
@@ -139,6 +141,15 @@ class TradeStore:
                         f"ALTER TABLE trades ADD COLUMN "
                         f"{column_name} {column_type}"
                     )
+
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    idx_trades_symbol_signal_time
+                ON trades(symbol, signal_time)
+                WHERE signal_time IS NOT NULL
+                """
+            )
 
             connection.execute(
                 """
@@ -164,7 +175,13 @@ class TradeStore:
         entry_client_order_id: Optional[str] = None,
         stop_client_algo_id: Optional[str] = None,
         take_profit_client_algo_id: Optional[str] = None,
+        signal_time: Optional[datetime] = None,
     ) -> int:
+        signal_time_text = (
+            None
+            if signal_time is None
+            else _utc_timestamp(signal_time)
+        )
         client_ids = (
             entry_client_order_id,
             stop_client_algo_id,
@@ -195,22 +212,39 @@ class TradeStore:
                     "An active trade already exists for this symbol."
                 )
 
+            if signal_time_text is not None:
+                existing_signal = connection.execute(
+                    """
+                    SELECT trade_id
+                    FROM trades
+                    WHERE symbol = ? AND signal_time = ?
+                    LIMIT 1
+                    """,
+                    (symbol, signal_time_text),
+                ).fetchone()
+                if existing_signal is not None:
+                    raise ValueError(
+                        "This signal candle was already processed."
+                    )
+
             cursor = connection.execute(
                 """
                 INSERT INTO trades (
-                    symbol, side, status, quantity, entry_price,
+                    symbol, side, status, signal_time,
+                    quantity, entry_price,
                     stop_loss_price, take_profit_price,
                     planned_risk, margin_used,
                     entry_client_order_id,
                     stop_client_algo_id,
                     take_profit_client_algo_id
                 ) VALUES (
-                    ?, ?, 'PLANNED', ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, 'PLANNED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
                     symbol,
                     side,
+                    signal_time_text,
                     _decimal_text(quantity, "quantity"),
                     _decimal_text(entry_price, "entry_price"),
                     _decimal_text(stop_loss_price, "stop_loss_price"),
@@ -361,6 +395,11 @@ class TradeStore:
             "symbol": row["symbol"],
             "side": row["side"],
             "status": row["status"],
+            "signal_time": (
+                None
+                if row["signal_time"] is None
+                else _utc_datetime(row["signal_time"])
+            ),
             "quantity": Decimal(row["quantity"]),
             "entry_price": Decimal(row["entry_price"]),
             "stop_loss_price": Decimal(row["stop_loss_price"]),

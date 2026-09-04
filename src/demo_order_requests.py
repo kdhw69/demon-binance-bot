@@ -47,6 +47,13 @@ def _validate_preview(preview: ExecutionPreview) -> None:
         raise ValueError("Execution preview side must be BUY or SELL.")
     if preview.quantity <= 0:
         raise ValueError("Execution preview quantity must be positive.")
+    if (
+        preview.signal_time.tzinfo is None
+        or preview.signal_time.utcoffset() is None
+    ):
+        raise ValueError(
+            "Execution preview signal time must be timezone-aware."
+        )
 
     if preview.side == "BUY":
         valid_prices = (

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,9 @@ def make_preview() -> ExecutionPreview:
     return ExecutionPreview(
         symbol="BTCUSDT",
         side="BUY",
+        signal_time=datetime(
+            2026, 9, 4, 7, 59, 59, tzinfo=timezone.utc
+        ),
         quantity=Decimal("0.001"),
         entry_price=Decimal("80000"),
         stop_loss=Decimal("79000"),

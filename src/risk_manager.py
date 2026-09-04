@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Dict, Optional
 
@@ -35,6 +36,7 @@ class AccountRiskState:
 class RiskPlan:
     symbol: str
     direction: str
+    signal_time: datetime
     quantity: Decimal
     entry_price: Decimal
     stop_loss: Decimal
@@ -122,6 +124,7 @@ def create_risk_plan(
     return RiskPlan(
         symbol=signal.symbol,
         direction=signal.direction,
+        signal_time=signal.candle_close_time,
         quantity=quantity,
         entry_price=signal.close_price,
         stop_loss=stop_loss,

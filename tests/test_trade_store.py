@@ -52,6 +52,44 @@ class TradeStoreTests(unittest.TestCase):
         ):
             self.record_trade()
 
+    def test_processed_signal_candle_cannot_be_reused(self):
+        signal_time = datetime(
+            2026, 9, 4, 7, 59, 59, tzinfo=timezone.utc
+        )
+        trade_id = self.store.record_planned_trade(
+            "BTCUSDT",
+            "BUY",
+            Decimal("0.001"),
+            Decimal("50000"),
+            Decimal("49000"),
+            Decimal("52000"),
+            Decimal("1"),
+            Decimal("5"),
+            signal_time=signal_time,
+        )
+        self.store.mark_open(trade_id)
+        self.store.mark_closed(
+            trade_id,
+            Decimal("50100"),
+            Decimal("1"),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "signal candle was already processed",
+        ):
+            self.store.record_planned_trade(
+                "BTCUSDT",
+                "BUY",
+                Decimal("0.001"),
+                Decimal("50000"),
+                Decimal("49000"),
+                Decimal("52000"),
+                Decimal("1"),
+                Decimal("5"),
+                signal_time=signal_time,
+            )
+
     def test_planned_client_order_ids_are_stored(self):
         trade_id = self.store.record_planned_trade(
             "BTCUSDT",
