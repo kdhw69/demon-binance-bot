@@ -1,7 +1,7 @@
 import os
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable
 
 from dotenv import load_dotenv
 from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
@@ -12,6 +12,7 @@ from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
 from .binance_client import create_client
 from .config import SYMBOLS
 from .exchange_rules import TradingRules, get_exchange_rules
+from .execution_engine import ExecutionPreview
 
 _DEMO_BASE_URL = "https://demo-fapi.binance.com"
 _ALLOWED_SIDES = {
@@ -43,6 +44,56 @@ def _test_quantity(price: Decimal, rules: TradingRules) -> Decimal:
         max(rules.minimum_order_quantity, notional_quantity),
         rules.quantity_step_size,
     )
+
+
+def _submit_execution_test_orders(
+    client,
+    previews: Iterable[ExecutionPreview],
+) -> Dict[str, bool]:
+    items = tuple(previews)
+    seen_symbols = set()
+
+    for preview in items:
+        if preview.symbol not in SYMBOLS:
+            raise ValueError("Execution preview symbol is not permitted.")
+        if preview.symbol in seen_symbols:
+            raise ValueError("Duplicate execution preview symbol.")
+        if preview.side not in _ALLOWED_SIDES:
+            raise ValueError("Execution preview side must be BUY or SELL.")
+        if preview.quantity <= 0:
+            raise ValueError("Execution preview quantity must be positive.")
+        seen_symbols.add(preview.symbol)
+
+    results = {}
+    for preview in items:
+        response = client.rest_api.test_order(
+            symbol=preview.symbol,
+            side=_ALLOWED_SIDES[preview.side],
+            type=TestOrderTypeEnum.MARKET,
+            quantity=str(preview.quantity),
+        )
+        if not 200 <= response.status < 300:
+            raise ValueError(
+                f"Execution test order was not accepted for {preview.symbol}."
+            )
+        results[preview.symbol] = True
+
+    return results
+
+
+def validate_execution_previews(
+    previews: Iterable[ExecutionPreview],
+) -> Dict[str, bool]:
+    load_dotenv(
+        dotenv_path=Path(__file__).resolve().parents[1] / ".env"
+    )
+    if os.getenv("BINANCE_BASE_URL") != _DEMO_BASE_URL:
+        raise ValueError(
+            "BINANCE_BASE_URL must target the Binance Futures Demo API."
+        )
+
+    client = create_client()
+    return _submit_execution_test_orders(client, previews)
 
 
 def submit_test_orders(side: str = "BUY") -> Dict[str, bool]:
