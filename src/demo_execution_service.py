@@ -178,6 +178,9 @@ def execute_demo_preview(
         preview.take_profit,
         preview.planned_risk,
         preview.margin_used,
+        requests.entry["new_client_order_id"],
+        requests.stop_loss["client_algo_id"],
+        requests.take_profit["client_algo_id"],
     )
 
     executed_quantity = None

@@ -161,14 +161,37 @@ class TradeStore:
         take_profit_price: Decimal,
         planned_risk: Decimal,
         margin_used: Decimal,
+        entry_client_order_id: Optional[str] = None,
+        stop_client_algo_id: Optional[str] = None,
+        take_profit_client_algo_id: Optional[str] = None,
     ) -> int:
+        client_ids = (
+            entry_client_order_id,
+            stop_client_algo_id,
+            take_profit_client_algo_id,
+        )
+        if any(value is not None for value in client_ids):
+            if any(
+                not isinstance(value, str) or not value
+                for value in client_ids
+            ):
+                raise ValueError(
+                    "All planned client order ids are required."
+                )
+
         with self._transaction() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO trades (
                     symbol, side, status, quantity, entry_price,
-                    stop_loss_price, take_profit_price, planned_risk, margin_used
-                ) VALUES (?, ?, 'PLANNED', ?, ?, ?, ?, ?, ?)
+                    stop_loss_price, take_profit_price,
+                    planned_risk, margin_used,
+                    entry_client_order_id,
+                    stop_client_algo_id,
+                    take_profit_client_algo_id
+                ) VALUES (
+                    ?, ?, 'PLANNED', ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     symbol,
@@ -179,6 +202,9 @@ class TradeStore:
                     _decimal_text(take_profit_price, "take_profit_price"),
                     _decimal_text(planned_risk, "planned_risk"),
                     _decimal_text(margin_used, "margin_used"),
+                    entry_client_order_id,
+                    stop_client_algo_id,
+                    take_profit_client_algo_id,
                 ),
             )
             return int(cursor.lastrowid)

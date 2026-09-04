@@ -221,6 +221,10 @@ class DemoExecutionServiceTests(unittest.TestCase):
         try:
             trade = store.read_active_trades()[0]
             self.assertEqual(trade["status"], "PLANNED")
+            self.assertEqual(
+                trade["entry_client_order_id"],
+                "demon-btcusdt-entry-abc123",
+            )
         finally:
             store.close()
 

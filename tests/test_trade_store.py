@@ -43,6 +43,53 @@ class TradeStoreTests(unittest.TestCase):
         self.assertEqual(trade["entry_price"], Decimal("50000.12345678"))
         self.assertEqual(trade["planned_risk"], Decimal("1.00000001"))
 
+    def test_planned_client_order_ids_are_stored(self):
+        trade_id = self.store.record_planned_trade(
+            "BTCUSDT",
+            "BUY",
+            Decimal("0.001"),
+            Decimal("50000"),
+            Decimal("49000"),
+            Decimal("52000"),
+            Decimal("1"),
+            Decimal("5"),
+            "demon-btc-entry-abc",
+            "demon-btc-stop-abc",
+            "demon-btc-take-abc",
+        )
+
+        trade = self.store.read_active_trades()[0]
+        self.assertEqual(trade["trade_id"], trade_id)
+        self.assertEqual(
+            trade["entry_client_order_id"],
+            "demon-btc-entry-abc",
+        )
+        self.assertEqual(
+            trade["stop_client_algo_id"],
+            "demon-btc-stop-abc",
+        )
+        self.assertEqual(
+            trade["take_profit_client_algo_id"],
+            "demon-btc-take-abc",
+        )
+
+    def test_partial_planned_client_ids_are_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "All planned client order ids",
+        ):
+            self.store.record_planned_trade(
+                "BTCUSDT",
+                "BUY",
+                Decimal("0.001"),
+                Decimal("50000"),
+                Decimal("49000"),
+                Decimal("52000"),
+                Decimal("1"),
+                Decimal("5"),
+                "demon-btc-entry-abc",
+            )
+
     def test_trade_lifecycle_and_utc_times(self):
         trade_id = self.record_trade()
         entry_time = datetime(2026, 9, 4, 12, 0, tzinfo=timezone(timedelta(hours=2)))
