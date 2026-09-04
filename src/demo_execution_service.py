@@ -7,6 +7,10 @@ from .demo_order_requests import (
     build_demo_order_requests,
     build_emergency_close_request,
 )
+from .demo_reconciliation import (
+    ReconciliationReport,
+    check_demo_reconciliation,
+)
 from .execution_engine import ExecutionPreview
 from .risk_guard import GuardDecision, check_live_guard
 from .trade_store import TradeStore
@@ -150,6 +154,10 @@ def execute_demo_preview(
     *,
     execution_enabled: bool = False,
     client=None,
+    reconciliation_checker: Callable[
+        [Optional[object], Optional[object]],
+        ReconciliationReport,
+    ] = check_demo_reconciliation,
     guard_checker: Callable[[Optional[object]], GuardDecision] = (
         check_live_guard
     ),
@@ -160,6 +168,16 @@ def execute_demo_preview(
         )
 
     requests = build_demo_order_requests(preview, token)
+    reconciliation = reconciliation_checker(
+        database_path,
+        client,
+    )
+    if not reconciliation.safe:
+        raise RuntimeError(
+            "Reconciliation blocked demo execution: "
+            + "; ".join(reconciliation.issues)
+        )
+
     decision = guard_checker(database_path)
     if not decision.allowed:
         raise RuntimeError(

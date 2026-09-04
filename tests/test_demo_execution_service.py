@@ -9,6 +9,7 @@ from src.demo_execution_service import (
     AmbiguousEntryStateError,
     execute_demo_preview,
 )
+from src.demo_reconciliation import ReconciliationReport
 from src.execution_engine import ExecutionPreview
 from src.risk_guard import GuardDecision
 from src.trade_store import TradeStore
@@ -60,6 +61,10 @@ def allowed_guard(_database_path):
     return GuardDecision(True, ())
 
 
+def allowed_reconciliation(_database_path, _client):
+    return ReconciliationReport(True, (), 0, 0)
+
+
 class DemoExecutionServiceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -82,10 +87,37 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 "abc123",
                 self.database_path,
                 client=self.client,
+                reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
 
         self.api.new_order.assert_not_called()
+
+    def test_reconciliation_failure_blocks_orders(self):
+        def blocked_reconciliation(_database_path, _client):
+            return ReconciliationReport(
+                False,
+                ("Protection order is missing.",),
+                1,
+                0,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Reconciliation blocked",
+        ):
+            execute_demo_preview(
+                make_preview(),
+                "abc123",
+                self.database_path,
+                execution_enabled=True,
+                client=self.client,
+                reconciliation_checker=blocked_reconciliation,
+                guard_checker=allowed_guard,
+            )
+
+        self.api.new_order.assert_not_called()
+        self.api.new_algo_order.assert_not_called()
 
     def test_success_records_all_exchange_order_ids(self):
         self.api.new_order.return_value = entry_response()
@@ -100,6 +132,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
             self.database_path,
             execution_enabled=True,
             client=self.client,
+            reconciliation_checker=allowed_reconciliation,
             guard_checker=allowed_guard,
         )
 
@@ -146,6 +179,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
 
@@ -182,6 +216,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
 
@@ -211,6 +246,7 @@ class DemoExecutionServiceTests(unittest.TestCase):
                 self.database_path,
                 execution_enabled=True,
                 client=self.client,
+                reconciliation_checker=allowed_reconciliation,
                 guard_checker=allowed_guard,
             )
 
