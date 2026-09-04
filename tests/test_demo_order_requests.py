@@ -5,11 +5,15 @@ from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
     NewAlgoOrderClosePositionEnum,
     NewAlgoOrderSideEnum,
     NewAlgoOrderTypeEnum,
+    NewOrderReduceOnlyEnum,
     NewOrderSideEnum,
     NewOrderTypeEnum,
 )
 
-from src.demo_order_requests import build_demo_order_requests
+from src.demo_order_requests import (
+    build_demo_order_requests,
+    build_emergency_close_request,
+)
 from src.execution_engine import ExecutionPreview
 
 
@@ -92,6 +96,37 @@ class DemoOrderRequestTests(unittest.TestCase):
             requests.take_profit["type"],
             NewAlgoOrderTypeEnum.TAKE_PROFIT_MARKET,
         )
+
+    def test_emergency_close_is_reduce_only_and_opposite(self):
+        request = build_emergency_close_request(
+            make_preview("BUY"),
+            Decimal("0.001"),
+            "abc123",
+        )
+
+        self.assertEqual(request["side"], NewOrderSideEnum.SELL)
+        self.assertEqual(request["type"], NewOrderTypeEnum.MARKET)
+        self.assertEqual(
+            request["reduce_only"],
+            NewOrderReduceOnlyEnum.TRUE,
+        )
+        self.assertEqual(request["position_side"], "BOTH")
+        self.assertEqual(request["quantity"], 0.001)
+
+    def test_emergency_close_rejects_invalid_quantity(self):
+        with self.assertRaisesRegex(ValueError, "positive"):
+            build_emergency_close_request(
+                make_preview(),
+                Decimal("0"),
+                "abc123",
+            )
+
+        with self.assertRaisesRegex(TypeError, "Decimal"):
+            build_emergency_close_request(
+                make_preview(),
+                0.001,
+                "abc123",
+            )
 
     def test_invalid_exit_prices_are_rejected(self):
         preview = ExecutionPreview(

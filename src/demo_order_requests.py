@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Dict
 
 from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
@@ -10,6 +11,7 @@ from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
     NewAlgoOrderTypeEnum,
     NewAlgoOrderWorkingTypeEnum,
     NewOrderNewOrderRespTypeEnum,
+    NewOrderReduceOnlyEnum,
     NewOrderSideEnum,
     NewOrderTypeEnum,
 )
@@ -61,6 +63,38 @@ def _validate_preview(preview: ExecutionPreview) -> None:
 
     if not valid_prices:
         raise ValueError("Execution preview exit prices are invalid.")
+
+
+def build_emergency_close_request(
+    preview: ExecutionPreview,
+    executed_quantity: Decimal,
+    token: str,
+) -> Dict[str, Any]:
+    _validate_preview(preview)
+    if not isinstance(executed_quantity, Decimal):
+        raise TypeError("Executed quantity must be a Decimal.")
+    if executed_quantity <= 0:
+        raise ValueError("Executed quantity must be positive.")
+
+    closing_side = (
+        NewOrderSideEnum.SELL
+        if preview.side == "BUY"
+        else NewOrderSideEnum.BUY
+    )
+    return {
+        "symbol": preview.symbol,
+        "side": closing_side,
+        "type": NewOrderTypeEnum.MARKET,
+        "position_side": "BOTH",
+        "reduce_only": NewOrderReduceOnlyEnum.TRUE,
+        "quantity": float(executed_quantity),
+        "new_client_order_id": _client_id(
+            preview.symbol,
+            "close",
+            token,
+        ),
+        "new_order_resp_type": NewOrderNewOrderRespTypeEnum.RESULT,
+    }
 
 
 def build_demo_order_requests(
