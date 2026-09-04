@@ -43,6 +43,15 @@ class TradeStoreTests(unittest.TestCase):
         self.assertEqual(trade["entry_price"], Decimal("50000.12345678"))
         self.assertEqual(trade["planned_risk"], Decimal("1.00000001"))
 
+    def test_duplicate_active_symbol_is_rejected(self):
+        self.record_trade()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "active trade already exists",
+        ):
+            self.record_trade()
+
     def test_planned_client_order_ids_are_stored(self):
         trade_id = self.store.record_planned_trade(
             "BTCUSDT",

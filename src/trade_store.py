@@ -180,6 +180,21 @@ class TradeStore:
                 )
 
         with self._transaction() as connection:
+            existing = connection.execute(
+                """
+                SELECT trade_id
+                FROM trades
+                WHERE symbol = ?
+                  AND status IN ('PLANNED', 'OPEN')
+                LIMIT 1
+                """,
+                (symbol,),
+            ).fetchone()
+            if existing is not None:
+                raise ValueError(
+                    "An active trade already exists for this symbol."
+                )
+
             cursor = connection.execute(
                 """
                 INSERT INTO trades (
