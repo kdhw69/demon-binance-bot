@@ -7,6 +7,7 @@ from binance_sdk_derivatives_trading_usds_futures import DerivativesTradingUsdsF
 
 
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+_DEMO_BASE_URL = "https://demo-fapi.binance.com"
 
 
 def create_client() -> DerivativesTradingUsdsFutures:
@@ -18,6 +19,10 @@ def create_client() -> DerivativesTradingUsdsFutures:
 
     if not api_key or not api_secret or not base_url:
         raise ValueError("Required Binance environment configuration is missing.")
+    if base_url != _DEMO_BASE_URL:
+        raise ValueError(
+            "BINANCE_BASE_URL must target the Binance Futures Demo API."
+        )
 
     configuration = ConfigurationRestAPI(
         api_key=api_key,
