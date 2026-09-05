@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Sequence
 
+from .cycle_logging import get_cycle_logger
 from .demo_execution_service import execute_demo_preview
 from .demo_trade_monitor import monitor_demo_trades
 from .execution_engine import run_dry_run_cycle
@@ -139,25 +140,45 @@ def _run_cycle(args) -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _parser().parse_args(argv)
-
-    if args.execute_demo and not _execution_gate_is_open(args):
-        print(
-            "Demo execution blocked: explicit CLI confirmation "
-            "and environment opt-in are both required."
-        )
-        return 2
-
-    if not args.execute_demo:
-        return _run_cycle(args)
+    logger = get_cycle_logger()
+    mode = "execute_demo" if args.execute_demo else "dry_run"
+    logger.info("cycle_started mode=%s", mode)
 
     try:
-        with _execution_lock():
-            return _run_cycle(args)
-    except BlockingIOError:
-        print(
-            "Demo execution blocked: another cycle is running."
-        )
-        return 1
+        if args.execute_demo and not _execution_gate_is_open(args):
+            print(
+                "Demo execution blocked: explicit CLI confirmation "
+                "and environment opt-in are both required."
+            )
+            logger.warning("cycle_blocked mode=%s reason=execution_gate", mode)
+            exit_code = 2
+        elif not args.execute_demo:
+            exit_code = _run_cycle(args)
+        else:
+            try:
+                with _execution_lock():
+                    exit_code = _run_cycle(args)
+            except BlockingIOError:
+                print(
+                    "Demo execution blocked: another cycle is running."
+                )
+                logger.warning(
+                    "cycle_blocked mode=%s reason=overlapping_cycle",
+                    mode,
+                )
+                exit_code = 1
+    except Exception:
+        logger.exception("cycle_crashed mode=%s", mode)
+        raise
+
+    status = "completed" if exit_code == 0 else "blocked_or_failed"
+    logger.info(
+        "cycle_finished mode=%s status=%s exit_code=%s",
+        mode,
+        status,
+        exit_code,
+    )
+    return exit_code
 
 
 if __name__ == "__main__":
