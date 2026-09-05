@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.demon.demo-binance-bot</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PROJECT_DIR__/.venv/bin/python</string>
+        <string>-m</string>
+        <string>src.run_demo_bot_cycle</string>
+        <string>--execute-demo</string>
+        <string>--confirmation</string>
+        <string>DEMO_ONLY</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DEMON_DEMO_EXECUTION_ENABLED</key>
+        <string>YES</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>3</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>__PROJECT_DIR__/data/logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/data/logs/launchd_stderr.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+</dict>
+</plist>
