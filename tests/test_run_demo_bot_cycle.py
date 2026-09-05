@@ -7,7 +7,7 @@ from unittest.mock import patch
 from src.demo_execution_service import DemoExecutionResult
 from src.demo_trade_monitor import MonitorReport
 from src.execution_engine import DryRunResult, ExecutionPreview
-from src.run_demo_bot_cycle import main
+from src.run_demo_bot_cycle import _execution_lock, main
 
 
 def preview():
@@ -118,6 +118,27 @@ class RunDemoBotCycleTests(unittest.TestCase):
         self.assertEqual(result, 1)
         run_dry_run.assert_not_called()
         execute.assert_not_called()
+
+    @patch("src.run_demo_bot_cycle.monitor_demo_trades")
+    def test_concurrent_execution_is_blocked(
+        self,
+        monitor,
+    ):
+        with patch.dict(
+            os.environ,
+            {"DEMON_DEMO_EXECUTION_ENABLED": "YES"},
+        ):
+            with _execution_lock():
+                result = main(
+                    [
+                        "--execute-demo",
+                        "--confirmation",
+                        "DEMO_ONLY",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        monitor.assert_not_called()
 
     @patch("src.run_demo_bot_cycle.secrets.token_hex")
     @patch("src.run_demo_bot_cycle.execute_demo_preview")

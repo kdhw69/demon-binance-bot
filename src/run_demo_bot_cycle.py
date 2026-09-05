@@ -1,6 +1,9 @@
 import argparse
+import fcntl
 import os
 import secrets
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional, Sequence
 
 from .demo_execution_service import execute_demo_preview
@@ -11,6 +14,31 @@ from .execution_engine import run_dry_run_cycle
 _EXECUTION_ENV = "DEMON_DEMO_EXECUTION_ENABLED"
 _EXECUTION_VALUE = "YES"
 _CONFIRMATION = "DEMO_ONLY"
+_LOCK_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "demo_bot_cycle.lock"
+)
+
+
+@contextmanager
+def _execution_lock():
+    _LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = _LOCK_PATH.open("a+")
+    try:
+        fcntl.flock(
+            handle.fileno(),
+            fcntl.LOCK_EX | fcntl.LOCK_NB,
+        )
+    except BlockingIOError:
+        handle.close()
+        raise
+
+    try:
+        yield
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -60,16 +88,7 @@ def _execution_gate_is_open(args) -> bool:
     )
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = _parser().parse_args(argv)
-
-    if args.execute_demo and not _execution_gate_is_open(args):
-        print(
-            "Demo execution blocked: explicit CLI confirmation "
-            "and environment opt-in are both required."
-        )
-        return 2
-
+def _run_cycle(args) -> int:
     if args.execute_demo:
         monitor_report = monitor_demo_trades()
         if monitor_report.issues:
@@ -116,6 +135,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     return 0
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = _parser().parse_args(argv)
+
+    if args.execute_demo and not _execution_gate_is_open(args):
+        print(
+            "Demo execution blocked: explicit CLI confirmation "
+            "and environment opt-in are both required."
+        )
+        return 2
+
+    if not args.execute_demo:
+        return _run_cycle(args)
+
+    try:
+        with _execution_lock():
+            return _run_cycle(args)
+    except BlockingIOError:
+        print(
+            "Demo execution blocked: another cycle is running."
+        )
+        return 1
 
 
 if __name__ == "__main__":
